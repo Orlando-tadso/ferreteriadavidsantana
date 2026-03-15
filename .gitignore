@@ -1,0 +1,12 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Logs and local runtime data
+*.log
+modules/core/logs/*.log
+
+# Secrets and env files
+.env
+.env.*

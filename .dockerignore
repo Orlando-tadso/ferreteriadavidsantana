@@ -1,0 +1,10 @@
+.git
+.github
+.vscode
+node_modules
+vendor
+*.log
+modules/core/logs/*.log
+.env
+.env.*
+README.md
