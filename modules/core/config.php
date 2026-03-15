@@ -371,18 +371,19 @@ $conn->query("UPDATE usuarios SET rol = 'admin' WHERE (nombre_usuario = 'admin' 
 // Asegurar que usuarios no admin queden como inspectores
 $conn->query("UPDATE usuarios SET rol = 'inspector' WHERE (rol IS NULL OR rol = '' OR rol = 'user') AND (nombre_usuario <> 'admin' AND nombre_completo NOT LIKE 'Administrador')");
 
-// Crear usuario administrador inicial cuando la instalación está vacía.
-$resultado_usuarios = $conn->query("SELECT COUNT(*) AS total FROM usuarios");
-if ($resultado_usuarios) {
-    $fila_usuarios = $resultado_usuarios->fetch_assoc();
-    $total_usuarios = (int) ($fila_usuarios['total'] ?? 0);
+// Crear usuario administrador inicial si no existe aún.
+$admin_inicial_usuario = getenv('DEFAULT_ADMIN_USER') ?: 'admin';
+$admin_inicial_nombre = getenv('DEFAULT_ADMIN_NAME') ?: 'Administrador General';
+$admin_inicial_clave = getenv('DEFAULT_ADMIN_PASSWORD') ?: 'Admin12345!';
 
-    if ($total_usuarios === 0) {
-        $admin_inicial_usuario = getenv('DEFAULT_ADMIN_USER') ?: 'admin';
-        $admin_inicial_nombre = getenv('DEFAULT_ADMIN_NAME') ?: 'Administrador General';
-        $admin_inicial_clave = getenv('DEFAULT_ADMIN_PASSWORD') ?: 'Admin12345!';
+$stmt_admin_existente = $conn->prepare("SELECT id FROM usuarios WHERE nombre_usuario = ? LIMIT 1");
+if ($stmt_admin_existente) {
+    $stmt_admin_existente->bind_param("s", $admin_inicial_usuario);
+    $stmt_admin_existente->execute();
+    $resultado_admin_existente = $stmt_admin_existente->get_result();
+
+    if ($resultado_admin_existente && $resultado_admin_existente->num_rows === 0) {
         $admin_inicial_hash = password_hash($admin_inicial_clave, PASSWORD_DEFAULT);
-
         $stmt_admin = $conn->prepare("INSERT INTO usuarios (nombre_usuario, nombre_completo, contrasena, rol, activo) VALUES (?, ?, ?, 'admin', 1)");
         if ($stmt_admin) {
             $stmt_admin->bind_param("sss", $admin_inicial_usuario, $admin_inicial_nombre, $admin_inicial_hash);
@@ -391,6 +392,8 @@ if ($resultado_usuarios) {
             logError('Usuario administrador inicial creado automáticamente.');
         }
     }
+
+    $stmt_admin_existente->close();
 }
 
 // Crear tabla de detalles_venta solo si no existe
