@@ -3,8 +3,9 @@ FROM php:8.2-apache
 # Enable required PHP extensions for MySQL and basic app compatibility.
 RUN docker-php-ext-install mysqli pdo pdo_mysql
 
-# Enable Apache rewrite and allow .htaccess rules.
-RUN a2enmod rewrite \
+# Ensure only one Apache MPM is active (required by mod_php).
+RUN a2dismod mpm_event mpm_worker || true \
+    && a2enmod mpm_prefork rewrite \
     && sed -ri 's/AllowOverride None/AllowOverride All/g' /etc/apache2/apache2.conf
 
 WORKDIR /var/www/html
