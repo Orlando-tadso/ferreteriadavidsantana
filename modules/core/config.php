@@ -42,6 +42,8 @@ iniciar_sesion();
 // Soporte para Railway, Heroku (ClearDB) y desarrollo local
 
 $is_remote_db = false;
+$missing_remote_config = false;
+$is_running_on_railway = (bool) (getenv('RAILWAY_ENVIRONMENT') || getenv('RAILWAY_PROJECT_ID') || getenv('RAILWAY_SERVICE_ID'));
 
 // Railway proporciona variables individuales (con prefijo del servicio MySQL)
 if (getenv('MYSQL_MYSQLHOST') && getenv('MYSQL_MYSQLUSER')) {
@@ -82,6 +84,10 @@ elseif (getenv('CLEARDB_DATABASE_URL')) {
     define('DB_PORT', $url['port'] ?? 3306);
     $is_remote_db = true;
 }
+// Si está en Railway y no hay variables de DB, no usar fallback local
+elseif ($is_running_on_railway) {
+    $missing_remote_config = true;
+}
 // Configuración local (XAMPP)
 else {
     define('DB_HOST', 'localhost');
@@ -112,12 +118,33 @@ function logError($message, $context = '') {
 $conn = null;
 $max_reintentos = 3;
 $retraso = 1; // segundos
+$last_connect_error = '';
+
+// Evita excepciones fatales de mysqli y permite manejar el error como 503.
+mysqli_report(MYSQLI_REPORT_OFF);
+
+if ($missing_remote_config) {
+    logError('Railway detectado sin variables de base de datos (MYSQLHOST/MYSQLUSER o DATABASE_URL).');
+    http_response_code(503);
+    die('<h1>Error de Configuracion</h1><p>Faltan variables de base de datos en Railway. Configura MYSQLHOST, MYSQLPORT, MYSQLUSER, MYSQLPASSWORD y MYSQLDATABASE en el servicio web.</p>');
+}
 
 for ($intento = 1; $intento <= $max_reintentos; $intento++) {
-    if ($is_remote_db) {
-        $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT);
-    } else {
-        $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, null, DB_PORT);
+    try {
+        if ($is_remote_db) {
+            $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT);
+        } else {
+            $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, null, DB_PORT);
+        }
+    } catch (Throwable $e) {
+        $last_connect_error = $e->getMessage();
+        logError("Intento $intento de conexión lanzó excepción", $last_connect_error);
+        if ($intento < $max_reintentos) {
+            sleep($retraso);
+            $retraso *= 2;
+            continue;
+        }
+        break;
     }
     
     if (!$conn->connect_error) {
@@ -128,7 +155,8 @@ for ($intento = 1; $intento <= $max_reintentos; $intento++) {
         break;
     }
     
-    $error_msg = "Intento $intento de conexión fallido: " . $conn->connect_error;
+    $last_connect_error = $conn->connect_error;
+    $error_msg = "Intento $intento de conexión fallido: " . $last_connect_error;
     logError($error_msg);
     
     if ($intento < $max_reintentos) {
@@ -138,8 +166,8 @@ for ($intento = 1; $intento <= $max_reintentos; $intento++) {
 }
 
 // Si después de reintentos sigue fallando
-if ($conn->connect_error) {
-    logError("Falló conexión a MySQL después de $max_reintentos intentos", $_SERVER['REQUEST_URI'] ?? 'CLI');
+if (!$conn || $conn->connect_error) {
+    logError("Falló conexión a MySQL después de $max_reintentos intentos", ($last_connect_error ?: ($_SERVER['REQUEST_URI'] ?? 'CLI')));
     http_response_code(503);
     die("<h1>Error de Sistema</h1><p>No se puede conectar a la base de datos. Por favor, intente más tarde.</p>");
 }
